@@ -12,6 +12,6 @@ Add a Pagerduty API key to `~/.pd` or use flag `--key='<your key>'`
 
 ### Example
 
-`./pd.py -t PSYEN6X -s P2APASH --report 2022-10-25`
+`./pd.py --team=PSYEN6X --service=P2APASH --report 2022-10-25`
 
-![img.png](img.png)
+![img.png](./img.png)
