@@ -23,5 +23,3 @@ api_token="xxxyyyzzzaaabbbccc"
 ### Example
 
 `./pd.py --team=PSYEN6X --service=P2APASH --report 2022-10-25`
-
-![img.png](./img.png)
