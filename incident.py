@@ -17,27 +17,17 @@ class Incident:
 
         return '-'
 
-    def _get_from_data(self, key):
-        if key in self.data:
-            return self.data[key]
-        else:
-            return "-"
-
-    def _get_from_data_nested_1(self, parent, child):
-        if parent in self.data:
-            if child in self.data[parent]:
-                return self.data[parent][child]
-        else:
-            return "-"
+    def _get(self, key):
+        return self.data.get(key, "-")
 
     def incident_number(self):
-        return self._get_from_data('incident_number')
+        return self._get('incident_number')
 
     def created_at(self):
-        return self._get_from_data('created_at')
+        return self._get('created_at')
 
     def description(self):
-        return self._get_from_data('description').rstrip()
+        return self._get('description').rstrip()
 
     def short_description(self):
         d = self.description()
@@ -47,13 +37,13 @@ class Incident:
             return d
 
     def status(self):
-        return self._get_from_data('status')
+        return self._get('status')
 
     def html_url(self):
-        return self._get_from_data('html_url')
+        return self._get('html_url')
 
     def urgency(self):
-        return self._get_from_data('urgency')
+        return self._get('urgency')
 
-    def escalation(self):
-        return self._get_from_data_nested_1('escalation_policy', 'summary')
+    def resolution_time(self):
+        return self._get('seconds_to_resolve')

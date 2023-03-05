@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+import signal
+import datetime
+import sys
+import toml
+from beautifultable import BeautifulTable
+
+import logger
+from commandparser import CommandParser
+from incident import Incident
+from pageduty import Pagerduty
+
+# Suppress annoying warning when importing from fuzzywuzzy package
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from fuzzywuzzy import process
+
+# Somthing for control-c
+signal.signal(signal.SIGINT, lambda s, f: (logger.info("Bye now"), sys.exit(130)))
+
+
+def main():
+    date_format = '%Y-%m-%d'
+
+    options = CommandParser()
+    logger.debug_flag = options.debug
+
+    config = load_config()
+
+    # Read Pagerduty API key from flags or config file
+    key = options.key if options.key else config.get('pagerduty', {}).get('api_token')
+
+    try:
+        if key is None:
+            logger.fatal("No key found in command options or config file")
+        else:
+            logger.info(f"Using Pagerduty Service ID {options.service} with Team ID {options.team}")
+
+        logger.info(f"Searching for incidents >= {options.start.strftime(date_format)} 00:00:00 "
+                    f"< {options.end.strftime(date_format)} 00:00:00")
+
+        incidents = fetch_incidents(Pagerduty(key, options.team, options.service), options)
+
+        if len(incidents) == 0:
+            logger.info("No incidents found")
+            sys.exit(0)
+
+        if options.report:
+            full_report(incidents, options)
+        else:
+            single_report(incidents, options)
+
+    except Exception as err:
+        logger.fatal(err)
+
+
+def full_report(incidents, options):
+    output(transform_flat(incidents, options), options.csv)
+    options.group = "Description"
+    output(transform_grouped(incidents, options), options.csv)
+    options.group = "Ack"
+    output(transform_grouped(incidents, options), options.csv)
+
+
+def single_report(incidents, options):
+    if options.group is None:
+        output(transform_flat(incidents, options), options.csv)
+    else:
+        output(transform_grouped(incidents, options), options.csv)
+
+
+def output(data, csv):
+    if csv:
+        output_csv(data)
+    else:
+        output_pretty(data)
+
+
+def load_config():
+    from os.path import expanduser
+    config_file = f"{expanduser('~')}/.pd.toml"
+    config = None
+
+    f = None
+    try:
+        f = open(config_file)
+        config = toml.load(f)
+    except FileNotFoundError:
+        pass  # Ignore no file found
+    except Exception as err:
+        logger.fatal(f"Error reading config file {config_file} - {err}")
+    finally:
+        f.close()
+
+    return config
+
+
+def escape_quotes(s):
+    return s.replace('"', '\\"')
+
+
+def output_pretty(flat_data):
+    table = BeautifulTable(maxwidth=180)
+    table.set_style(BeautifulTable.STYLE_BOX_ROUNDED)
+    table.columns.header = flat_data[0]
+
+    for row in flat_data[1:]:
+        table.rows.append(row)
+
+    print(table)
+
+
+def output_csv(data):
+    for row in data:
+        line = ""
+        for item in row:
+            line += f"\"{escape_quotes(str(item))}\","
+        print(line.rstrip(","))
+
+
+def transform_flat(incidents, options):
+    flat = [["Incident", "Created", "Description", "Ack", "Status", "Urgency", "Resolution Time", "Html_url"]]
+
+    for i in incidents:
+        flat.append([
+            i.incident_number(),
+            i.created_at(),
+            i.description().replace("\n", " ") if options.full else i.short_description().replace("\n", " "),
+            i.acknowledged_by(),
+            i.status(),
+            i.urgency(),
+            str(datetime.timedelta(seconds=i.resolution_time())).split('.')[0],  # remove microseconds
+            i.html_url()
+        ])
+
+    return flat
+
+
+def transform_grouped(incidents, options):
+    flat = transform_flat(incidents, options)
+
+    column_names = flat[0]
+
+    if options.group not in column_names:
+        raise RuntimeError(f"Unable to find column: {options.group}")
+
+    # Find index of the grouping field. Case-insensitive match on user specified field name
+    grouper_index = [col.lower() for col in column_names].index(options.group.lower())
+
+    groups = {}
+
+    fuzzy_groups = {}
+
+    for i in flat[1:]:
+        key = i[grouper_index]
+
+        if options.fuzz:
+            # Get current groups
+            current_groups = groups.keys()
+
+            # Get the best match
+            if len(current_groups) > 0:
+                best_match, score = process.extractOne(key, current_groups)
+
+                # If the match is good keep track of the columns where we have fuzzed
+                # and group on existing key
+                if score >= options.fuzz_match:
+                    logger.debug(f"{score} > {options.fuzz_match}. Matching {key} and {best_match}")
+
+                    if best_match in fuzzy_groups:
+                        fuzzy_groups[best_match] += 1
+                    else:
+                        fuzzy_groups[best_match] = 1
+
+                    key = best_match
+
+        # Add key or increment counter in dict
+        if key in groups:
+            groups[key] = groups[key] + 1
+        else:
+            groups[key] = 1
+
+    # Where a group was achieved through fuzzing add a prefix to the key so it's clearer what happened in output
+    for group in fuzzy_groups.keys():
+        groups[f">> {fuzzy_groups[group]} FUZZY MATCHED <<\n{group}"] = groups.pop(group)
+
+    # Add headers to grouped output
+    grouped_flat = [[options.group.title(), "Count"]]
+
+    for group, count in sorted(groups.items(), key=lambda item: item[1], reverse=True):
+        grouped_flat.append([
+            group,
+            count
+        ])
+
+    return grouped_flat
+
+
+def fetch_incidents(pg, options) -> []:
+    """Fetch PagerDuty incidents, log_entries, notes"""
+
+    # Incidents with log entries and notes
+    full_incidents = []
+
+    incidents = pg.fetch_raw_incidents(options.start, options.end)
+
+    logger.info(f"Incidents found: {len(incidents)}")
+
+    for i in incidents:
+
+        # Reading incident logs os slow only do it if requested
+        if options.logs:
+            log_entries = pg.fetch_incident_log(i['id'])
+        else:
+            log_entries = []
+
+        notes = pg.fetch_incident_notes(i['id'])
+        logger.info(f"{len(notes)} notes for incident: {i['incident_number']}")
+        full_incidents.append(Incident(i, log_entries, notes))
+
+    return full_incidents
+
+
+if __name__ == "__main__":
+    main()
