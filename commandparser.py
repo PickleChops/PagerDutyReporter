@@ -70,7 +70,7 @@ Example:
     
 Supported Fields:
 
-  "Incident", "Created", "Description", "Ack", "Status", "Urgency", "Resolution Tine", "Html_url"
+  "Service", "Team", "Incident", "Created", "Description", "Ack", "Urgency", "Resolution Tine"
 
 Flags
 -----

@@ -39,8 +39,11 @@ class Incident:
     def status(self):
         return self._get('status')
 
-    def html_url(self):
-        return self._get('html_url')
+    def team(self):
+        return self._get('team_name')
+
+    def service(self):
+        return self._get('service_name')
 
     def urgency(self):
         return self._get('urgency')

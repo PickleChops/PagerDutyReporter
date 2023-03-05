@@ -121,18 +121,18 @@ def output_csv(data):
 
 
 def transform_flat(incidents, options):
-    flat = [["Incident", "Created", "Description", "Ack", "Status", "Urgency", "Resolution Time", "Html_url"]]
+    flat = [["Service", "Team", "Incident", "Created", "Description", "Ack", "Urgency", "Resolution Time"]]
 
     for i in incidents:
         flat.append([
+            i.service(),
+            i.team(),
             i.incident_number(),
             i.created_at(),
             i.description().replace("\n", " ") if options.full else i.short_description().replace("\n", " "),
             i.acknowledged_by(),
-            i.status(),
             i.urgency(),
             str(datetime.timedelta(seconds=i.resolution_time())).split('.')[0],  # remove microseconds
-            i.html_url()
         ])
 
     return flat
@@ -217,7 +217,9 @@ def fetch_incidents(pg, options) -> []:
             log_entries = []
 
         notes = pg.fetch_incident_notes(i['id'])
-        logger.info(f"{len(notes)} notes for incident: {i['incident_number']}")
+        logger.info(f"Reading incident {i['incident_number']}"
+                    f" : {str(len(log_entries)) + ' log entries read |' if options.logs else ''}"
+                    f" {len(notes)} notes found")
         full_incidents.append(Incident(i, log_entries, notes))
 
     return full_incidents
