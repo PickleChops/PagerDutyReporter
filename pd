@@ -36,12 +36,13 @@ def main():
         if key is None:
             logger.fatal("No key found in command options or config file")
         else:
-            logger.info(f"Using Pagerduty Service ID {options.service} with Team ID {options.team}")
+            logger.info(f"Using Pagerduty Service IDs {','.join(options.services)}"
+                        f" with Team IDs {','.join(options.teams)}")
 
         logger.info(f"Searching for incidents >= {options.start.strftime(date_format)} 00:00:00 "
                     f"< {options.end.strftime(date_format)} 00:00:00")
 
-        incidents = fetch_incidents(Pagerduty(key, options.team, options.service), options)
+        incidents = fetch_incidents(Pagerduty(key, options.teams, options.services), options)
 
         if len(incidents) == 0:
             logger.info("No incidents found")
@@ -57,7 +58,7 @@ def main():
 
 
 def full_report(incidents, options):
-    output(transform_flat(incidents, options), options.csv)
+    output(sort_results(transform_flat(incidents, options), 'service', 'description'), options.csv)
     options.group = "Description"
     output(transform_grouped(incidents, options), options.csv)
     options.group = "Ack"
@@ -66,7 +67,8 @@ def full_report(incidents, options):
 
 def single_report(incidents, options):
     if options.group is None:
-        output(transform_flat(incidents, options), options.csv)
+        data = sort_results(transform_flat(incidents, options), 'service', 'description')
+        output(data, options.csv)
     else:
         output(transform_grouped(incidents, options), options.csv)
 
@@ -124,6 +126,11 @@ def transform_flat(incidents, options):
     flat = [["Service", "Team", "Incident", "Created", "Description", "Ack", "Urgency", "Resolution Time"]]
 
     for i in incidents:
+
+        duration_string = '-'
+        if i.resolution_time():
+            duration_string = str(datetime.timedelta(seconds=i.resolution_time())).split('.')[0]  # remove microseconds
+
         flat.append([
             i.service(),
             i.team(),
@@ -132,59 +139,61 @@ def transform_flat(incidents, options):
             i.description().replace("\n", " ") if options.full else i.short_description().replace("\n", " "),
             i.acknowledged_by(),
             i.urgency(),
-            str(datetime.timedelta(seconds=i.resolution_time())).split('.')[0],  # remove microseconds
+            duration_string
         ])
 
     return flat
 
 
+def column_index(column_names, column_to_find):
+    # Find index of the grouping field. Case-insensitive match on user specified field name
+    try:
+        index = [col.lower() for col in column_names].index(column_to_find.lower())
+    except ValueError:
+        raise RuntimeError(f"Unable to find column: {column_to_find}")
+
+    return index
+
+
 def transform_grouped(incidents, options):
     flat = transform_flat(incidents, options)
 
-    column_names = flat[0]
-
-    if options.group not in column_names:
-        raise RuntimeError(f"Unable to find column: {options.group}")
-
-    # Find index of the grouping field. Case-insensitive match on user specified field name
-    grouper_index = [col.lower() for col in column_names].index(options.group.lower())
+    grouper_index = column_index(flat[0], options.group)
 
     groups = {}
-
     fuzzy_groups = {}
 
     for i in flat[1:]:
         key = i[grouper_index]
 
-        if options.fuzz:
-            # Get current groups
-            current_groups = groups.keys()
+        if key not in groups:
 
-            # Get the best match
-            if len(current_groups) > 0:
-                best_match, score = process.extractOne(key, current_groups)
+            if options.fuzz:
+                # Get current groups
+                current_groups = groups.keys()
 
-                # If the match is good keep track of the columns where we have fuzzed
-                # and group on existing key
-                if score >= options.fuzz_match:
-                    logger.debug(f"{score} > {options.fuzz_match}. Matching {key} and {best_match}")
+                # Get the best match
+                if len(current_groups) > 0:
+                    best_match, score = process.extractOne(key, current_groups)
 
-                    if best_match in fuzzy_groups:
-                        fuzzy_groups[best_match] += 1
-                    else:
-                        fuzzy_groups[best_match] = 1
+                    # If the match is good keep track of the columns where we have fuzzed
+                    # and group on existing key
+                    if score >= options.fuzz_match:
+                        logger.debug(f"{score} > {options.fuzz_match}. Matching {key} and {best_match}")
 
-                    key = best_match
+                        if best_match in fuzzy_groups:
+                            fuzzy_groups[best_match] += 1
+                        else:
+                            fuzzy_groups[best_match] = 1
 
-        # Add key or increment counter in dict
-        if key in groups:
-            groups[key] = groups[key] + 1
-        else:
-            groups[key] = 1
+                        key = best_match
 
-    # Where a group was achieved through fuzzing add a prefix to the key so it's clearer what happened in output
+        # Add either exact match or fuzzy key to dict
+        groups[key] = groups[key] + 1 if key in groups else 1
+
+    # Where a group was achieved through fuzzing add a prefix to the key, so it's clearer what happened in output
     for group in fuzzy_groups.keys():
-        groups[f">> {fuzzy_groups[group]} FUZZY MATCHED <<\n{group}"] = groups.pop(group)
+        groups[f"fuzzed:{fuzzy_groups[group]} | {group}"] = groups.pop(group)
 
     # Add headers to grouped output
     grouped_flat = [[options.group.title(), "Count"]]
@@ -196,6 +205,13 @@ def transform_grouped(incidents, options):
         ])
 
     return grouped_flat
+
+
+def sort_results(data, col1, col2):
+    col1_index = column_index(data[0], col1)
+    col2_index = column_index(data[0], col2)
+    sorted_data = sorted(data[1:], key=lambda x: (x[col1_index], x[col2_index]))
+    return [data[0]] + sorted_data
 
 
 def fetch_incidents(pg, options) -> []:
@@ -216,10 +232,16 @@ def fetch_incidents(pg, options) -> []:
         else:
             log_entries = []
 
-        notes = pg.fetch_incident_notes(i['id'])
-        logger.info(f"Reading incident {i['incident_number']}"
-                    f" : {str(len(log_entries)) + ' log entries read |' if options.logs else ''}"
-                    f" {len(notes)} notes found")
+        if options.notes:
+            notes = pg.fetch_incident_notes(i['id'])
+        else:
+            notes = []
+
+        reading_log = f"{len(log_entries)} log entries read" if len(log_entries) > 0 else ''
+        notes_log = f"{len(notes)} found" if len(notes) > 0 else ''
+        divider = ' | ' if reading_log and notes_log else ''
+
+        logger.info(f"Incident {i['incident_number']} {reading_log}{divider}{notes_log}")
         full_incidents.append(Incident(i, log_entries, notes))
 
     return full_incidents

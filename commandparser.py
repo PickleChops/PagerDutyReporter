@@ -11,9 +11,10 @@ class CommandParser:
 
     OPTIONS = [
         ('help', 'h', 'Show this help message'),
-        ('team=', 't', 'Pagerduty Team ID'),
-        ('service=', 's', 'Pagerduty Service ID. Can be a list'),
+        ('teams=', 't', 'Pagerduty Team IDs, comma separated'),
+        ('services=', 's', 'Pagerduty Service IDs, comma separated'),
         ('logs', 'l', 'Read log entries for each incident'),
+        ('notes', 'n', 'Read notes for each incident'),
         ('key=', 'k', 'PagerDuty API key - defaults to looking for a ~/.pd.toml file'),
         ('csv', 'c', 'Output as csv'),
         ('group=', 'g', 'Group by field, e.g. --group="description"'),
@@ -27,11 +28,12 @@ class CommandParser:
 
     def __init__(self):
         self.help = False
-        self.team = None
-        self.service = None
+        self.teams = None
+        self.services = None
         self.start = None
         self.end = None
         self.logs = False
+        self.notes = False
         self.key = None
         self.csv = False
         self.group = None
@@ -58,7 +60,7 @@ class CommandParser:
 pd
 ----
  
-Fetch incidents from a Pagerduty service and output them in a few different ways
+Fetch incidents from Pagerduty services and output them in a few different ways
 
 pd <flags> [start date] [end date]
 
@@ -84,11 +86,17 @@ Flags
             self.show_help()
             sys.exit(0)
 
-        if self.team is None:
-            logger.fatal("You need to specify a Pagerduty Team ID")
+        if self.teams is None:
+            logger.fatal("You need to specify at least one Pagerduty Team ID")
 
-        if self.service is None:
-            logger.fatal("You need to specify a Pagerduty Service ID")
+        # Split by comma, trim whitespace, and remove any empty list items
+        self.teams = list(filter(None, [i.strip() for i in self.teams.split(",")]))
+
+        if self.services is None:
+            logger.fatal("You need to specify at least one Pagerduty Service ID")
+
+        # Split by comma, trim whitespace, and remove any empty list items
+        self.services = list(filter(None, [i.strip() for i in self.services.split(",")]))
 
         if len(self.args) == 0:
             self.start = datetime.today()

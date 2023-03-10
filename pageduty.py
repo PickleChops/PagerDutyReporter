@@ -11,9 +11,9 @@ class Pagerduty:
     SHORT_DATE_FORMAT = '%Y-%m-%d'
     DATE_FORMAT = '%Y-%m-%dT%H:%M:%S%z'
 
-    def __init__(self, api_key, team_id, service_id):
-        self.team_id = team_id
-        self.service_id = service_id
+    def __init__(self, api_key, team_ids, service_ids):
+        self.team_ids = team_ids
+        self.service_ids = service_ids
 
         self.default_headers = {
             "Authorization": f"Token token={api_key}",
@@ -97,8 +97,8 @@ class Pagerduty:
                                    "filters": {
                                        "created_at_start": start_date.strftime(self.DATE_FORMAT),
                                        "created_at_end": end_date.strftime(self.DATE_FORMAT),
-                                       "service_ids": [self.service_id],
-                                       "team_ids": [self.team_id],
+                                       "service_ids": self.service_ids,
+                                       "team_ids": self.team_ids,
                                    },
                                    "limit": self.PAGE_LIMIT,
                                    "order": "asc",
@@ -131,8 +131,9 @@ class Pagerduty:
                 j = self._process_json_response(
                     self._get("/incidents",
                               {
-                                  "service_ids[]": self.service_id,
-                                  "team_ids[]": self.team_id,
+                                  # TODO these arrays probably need flattening, but this method not current used so...
+                                  "service_ids[]": self.service_ids,
+                                  "team_ids[]": self.team_ids,
                                   "offset": offset,
                                   "total": "false",
                                   "sort_by": "incident_number",

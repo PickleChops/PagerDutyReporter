@@ -22,4 +22,4 @@ api_token="xxxyyyzzzaaabbbccc"
 
 ### Example
 
-`./pd.py --team=PSYEN6X --service=P2APASH --report 2022-10-25`
+`./pd.py --teams=PXXXX,PYYYY --services=P2APAXX,P2AXXX --report 2022-10-25`
