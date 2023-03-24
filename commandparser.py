@@ -9,21 +9,24 @@ import logger
 class CommandParser:
     """Read the command line options"""
 
+    FORMAT_PRETTY = 'pretty'
+    FORMAT_CSV = 'csv'
+    FORMAT_CONFLUENCE = 'confluence'
+
     OPTIONS = [
         ('help', 'h', 'Show this help message'),
         ('teams=', 't', 'Pagerduty Team IDs, comma separated'),
         ('services=', 's', 'Pagerduty Service IDs, comma separated'),
         ('logs', 'l', 'Read log entries for each incident'),
         ('notes', 'n', 'Read notes for each incident'),
-        ('key=', 'k', 'PagerDuty API key - defaults to looking for a ~/.pd.toml file'),
-        ('csv', 'c', 'Output as csv'),
+        ('key=', 'k', 'PagerDuty API key, defaults to looking for a ~/.pd.toml file'),
+        ('format=', 'o', f"Output [{FORMAT_PRETTY}|{FORMAT_CSV}|{FORMAT_CONFLUENCE}], default {FORMAT_PRETTY}"),
         ('group=', 'g', 'Group by field, e.g. --group="description"'),
         ('fuzz', 'z', 'Fuzz matching on grouping'),
         ('fuzz-score=', 'm', 'Fuzz matching threshold - default is 90%'),
         ('full', 'f', 'Full descriptions, default is to shorten'),
-        ('debug', 'x', 'Debug output'),
         ('report', 'r', 'Output full report'),
-        ('confluence', 'w', 'Create a page in Confluence with the results')
+        ('debug', 'x', 'Debug output'),
     ]
 
     def __init__(self):
@@ -35,7 +38,7 @@ class CommandParser:
         self.logs = False
         self.notes = False
         self.key = None
-        self.csv = False
+        self.format = self.FORMAT_PRETTY
         self.group = None
         self.fuzz = False
         self.fuzz_match = 90
@@ -112,6 +115,9 @@ Flags
             else:
                 self.end = datetime.today() + timedelta(days=1)
                 logger.info("No end date specified, defaulting to end date of today")
+
+        if self.format.lower() not in [self.FORMAT_PRETTY,self.FORMAT_CSV,self.FORMAT_CONFLUENCE]:
+            logger.fatal(f"Format must be one of [{self.FORMAT_PRETTY}|{self.FORMAT_CSV}|{self.FORMAT_CONFLUENCE}]")
 
         if self.logs:
             logger.info("Will read incident logs (slow and just provides Ack info)")
